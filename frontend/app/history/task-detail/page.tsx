@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { Card, CardBody, CardHeader, Spinner, Button } from "@heroui/react";
 import { motion } from "framer-motion";
@@ -16,11 +16,26 @@ interface TaskResponse {
   data?: any;
 }
 
+// 搜索参数组件，用于获取URL参数
+function SearchParamsComponent({
+  onParamsReady
+}: {
+  onParamsReady: (taskId: string | null) => void
+}) {
+  const searchParams = useSearchParams();
+  const taskId = searchParams.get("id");
+
+  useEffect(() => {
+    onParamsReady(taskId);
+  }, [taskId, onParamsReady]);
+
+  return null;
+}
+
 // 客户端组件，处理数据获取和渲染
 export default function TaskDetailPage(): JSX.Element {
-  const searchParams = useSearchParams();
   const router = useRouter();
-  const taskId = searchParams.get("id");
+  const [taskId, setTaskId] = useState<string | null>(null);
 
   const [loading, setLoading] = useState<boolean>(true);
   const [task, setTask] = useState<TaskDetail | null>(null);
@@ -48,6 +63,11 @@ export default function TaskDetailPage(): JSX.Element {
     setError(errorMsg);
     setTask(null);
   };
+
+  // 处理搜索参数回调
+  const handleParamsReady = useCallback((id: string | null) => {
+    setTaskId(id);
+  }, []);
 
   useEffect(() => {
     const fetchTaskDetail = async (): Promise<void> => {
@@ -114,7 +134,7 @@ export default function TaskDetailPage(): JSX.Element {
     };
 
     fetchTaskDetail();
-  }, [taskId]);
+  }, [taskId, handleApiError]);
 
   const handleBack = (): void => {
     router.push("/history");
@@ -122,21 +142,30 @@ export default function TaskDetailPage(): JSX.Element {
 
   return (
     <section className="w-full min-h-screen">
+      {/* 使用Suspense包裹SearchParamsComponent */}
+      <Suspense fallback={<div className="flex justify-center items-center h-40">
+        <Spinner color="primary" size="lg" />
+      </div>}>
+        <SearchParamsComponent onParamsReady={handleParamsReady} />
+      </Suspense>
+
       <Card className="w-full h-full border-none rounded-none">
         <CardHeader className="flex justify-between items-center px-6 py-4">
           <h1 className="text-2xl font-bold">任务详情</h1>
           <div className="flex gap-2">
-            <Button
-              as="a"
-              color="secondary"
-              href={`/history/task-detail?id=${taskId}`}
-              rel="noopener noreferrer"
-              startContent={<Icon icon="solar:square-top-right-linear" width={16} />}
-              target="_blank"
-              variant="bordered"
-            >
-              新标签页打开
-            </Button>
+            {taskId && (
+              <Button
+                as="a"
+                color="secondary"
+                href={`/history/task-detail?id=${taskId}`}
+                rel="noopener noreferrer"
+                startContent={<Icon icon="solar:square-top-right-linear" width={16} />}
+                target="_blank"
+                variant="bordered"
+              >
+                新标签页打开
+              </Button>
+            )}
             <Button
               color="primary"
               startContent={<Icon icon="solar:arrow-left-linear" width={16} />}

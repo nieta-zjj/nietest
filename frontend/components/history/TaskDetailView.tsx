@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
   Card,
   CardBody,
@@ -18,7 +18,7 @@ import {
 import { Icon } from "@iconify/react";
 
 import { TaskDetail } from "@/types/task";
-import { getTaskMatrix } from "@/utils/taskService";
+import { apiService } from "@/utils/api/apiService";
 
 // 占位图片URL
 const PLACEHOLDER_IMAGE_URL = "/placeholder-image.png";
@@ -83,6 +83,16 @@ export const TaskDetailView: React.FC<TaskDetailViewProps> = ({ task }) => {
   const [matrixData, setMatrixData] = useState<MatrixData | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+
+  // 使用useRef跟踪数据是否已加载，避免重复请求
+  const dataLoadedRef = useRef<boolean>(false);
+  const taskIdRef = useRef<string | null>(null);
+  const isMountedRef = useRef<boolean>(true);
+  // 使用ref来跟踪URL验证是否已完成
+  const urlValidationDoneRef = useRef<boolean>(false);
+  // 使用ref来跟踪x轴和y轴的选择，避免依赖状态变量
+  const xAxisRef = useRef<string | null>(null);
+  const yAxisRef = useRef<string | null>(null);
 
   // 表格缩放控制
   const [tableScale, setTableScale] = useState<number>(100);
@@ -189,23 +199,62 @@ export const TaskDetailView: React.FC<TaskDetailViewProps> = ({ task }) => {
     return 20; // 如果超过16张，使用更小的尺寸
   };
 
-  // 从后端获取矩阵数据
-  const fetchMatrixData = useCallback(async () => {
-    if (!task || !task.id) return;
+  // 使用ref来跟踪请求状态
+  const isRequestPendingRef = useRef<boolean>(false);
+
+  // 从后端获取矩阵数据 - 只在组件挂载和taskId变化时调用一次
+  const fetchMatrixData = useCallback(async (taskId: string, forceRefresh = false) => {
+    // 如果组件已卸载或没有任务ID，则不执行
+    if (!isMountedRef.current || !taskId) return;
+
+    // 如果已经有请求在进行中，则不再发起新请求
+    if (isRequestPendingRef.current) {
+      if (process.env.NODE_ENV === 'development') {
+        console.log(`已有请求正在进行，跳过新请求: ${taskId}`);
+      }
+      return;
+    }
+
+    // 如果已经加载过该ID的数据且不是强制刷新，则不再重复请求
+    if (!forceRefresh && dataLoadedRef.current && taskIdRef.current === taskId) {
+      if (process.env.NODE_ENV === 'development') {
+        console.log(`数据已加载，跳过请求: ${taskId}`);
+      }
+      return;
+    }
+
+    // 标记请求开始
+    isRequestPendingRef.current = true;
+    if (process.env.NODE_ENV === 'development') {
+      console.log(`开始请求矩阵数据: ${taskId}, 强制刷新: ${forceRefresh}`);
+    }
 
     setIsLoading(true);
     setError(null);
 
     try {
-      // 调用后端API获取矩阵数据
-      const response = await getTaskMatrix(task.id);
+      // 更新当前任务ID引用
+      taskIdRef.current = taskId;
 
-      if (!response.success || !response.data) {
+      // 调用后端API获取矩阵数据
+      const response = await apiService.task.getTaskMatrix(taskId);
+
+      // 如果组件已卸载，不再继续处理
+      if (!isMountedRef.current) return;
+
+      if (response.error || !response.data) {
         throw new Error(response.error || "获取矩阵数据失败");
+      }
+
+      if (process.env.NODE_ENV === 'development') {
+        console.log(`成功获取矩阵数据: ${taskId}`);
       }
 
       // 设置矩阵数据
       setMatrixData(response.data);
+
+      // 标记数据已加载
+      dataLoadedRef.current = true;
 
       // 提取变量名称和可用变量
       const variables: string[] = [];
@@ -230,38 +279,87 @@ export const TaskDetailView: React.FC<TaskDetailViewProps> = ({ task }) => {
         });
       }
 
-      // 存储变量名称映射
-      setVariableNames(varNames);
-      setAvailableVariables(variables);
+      // 如果组件已卸载，不再更新状态
+      if (!isMountedRef.current) return;
 
-      // 默认选择前两个变量作为X轴和Y轴
-      if (variables.length >= 2) {
-        setXAxis(variables[0]);
-        setYAxis(variables[1]);
-      } else if (variables.length === 1) {
-        setXAxis(variables[0]);
-        setYAxis("");
-      } else {
-        setXAxis("");
-        setYAxis("");
-      }
+      // 批量更新状态，减少重新渲染次数
+      const batchUpdate = () => {
+        setVariableNames(varNames);
+        setAvailableVariables(variables);
+
+        // 只在初始加载时设置默认轴，避免覆盖用户选择
+        // 注意：这里不依赖xAxis和yAxis的当前值，而是使用局部变量currentXAxis和currentYAxis
+        const currentXAxis = xAxisRef.current;
+        const currentYAxis = yAxisRef.current;
+        const shouldSetDefaultAxes = (!currentXAxis && !currentYAxis) || forceRefresh;
+
+        if (shouldSetDefaultAxes) {
+          if (variables.length >= 2) {
+            setXAxis(variables[0]);
+            setYAxis(variables[1]);
+            // 同时更新ref值
+            xAxisRef.current = variables[0];
+            yAxisRef.current = variables[1];
+          } else if (variables.length === 1) {
+            setXAxis(variables[0]);
+            setYAxis("");
+            // 同时更新ref值
+            xAxisRef.current = variables[0];
+            yAxisRef.current = "";
+          } else {
+            setXAxis("");
+            setYAxis("");
+            // 同时更新ref值
+            xAxisRef.current = "";
+            yAxisRef.current = "";
+          }
+        }
+      };
+
+      // 使用requestAnimationFrame确保状态更新在同一帧内完成
+      requestAnimationFrame(batchUpdate);
     } catch (err) {
-      // eslint-disable-next-line no-console
-      // eslint-disable-next-line no-console
-      // eslint-disable-next-line no-console
+      // 如果组件已卸载，不再更新状态
+      if (!isMountedRef.current) return;
+
       console.error("Error fetching matrix data:", err);
       setError("获取矩阵数据失败，请刷新页面重试");
+      dataLoadedRef.current = false;
     } finally {
-      setIsLoading(false);
+      if (isMountedRef.current) {
+        setIsLoading(false);
+      }
+
+      // 标记请求结束
+      isRequestPendingRef.current = false;
     }
-  }, [task]);
+  }, []); // 不依赖任何状态，确保函数不会因为状态变化而重新创建
 
-  // 当任务变化时，获取矩阵数据并检查批次标签
+  // 只在组件挂载和任务ID变化时获取矩阵数据
   useEffect(() => {
-    fetchMatrixData();
+    // 组件挂载标记设为true
+    isMountedRef.current = true;
 
-    // 检查是否有batch标签
-    if (task && task.tags) {
+    // 如果有任务ID，且数据未加载或任务ID变化，则获取数据
+    if (task?.id && (!dataLoadedRef.current || taskIdRef.current !== task.id)) {
+      if (process.env.NODE_ENV === 'development') {
+        console.log(`任务ID变化或数据未加载: ${taskIdRef.current} -> ${task.id}`);
+      }
+      // 重置加载状态
+      dataLoadedRef.current = false;
+      // 获取矩阵数据
+      fetchMatrixData(task.id, false);
+    }
+
+    // 清理函数：组件卸载时将标记设置为false，防止异步操作更新已卸载组件的状态
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, [task?.id, fetchMatrixData]); // 依赖于task.id和fetchMatrixData
+
+  // 单独处理batch标签检查，避免不必要的矩阵数据请求
+  useEffect(() => {
+    if (task?.tags) {
       const batchTag = task.tags.find(
         (tag) => tag.type === "batch" && !tag.isVariable && parseInt(tag.value) > 1
       );
@@ -270,23 +368,42 @@ export const TaskDetailView: React.FC<TaskDetailViewProps> = ({ task }) => {
     } else {
       setHasBatchTag(false);
     }
-  }, [fetchMatrixData, task]);
+  }, [task?.tags]);
+
+  // 同步xAxis和yAxis的状态变化到ref中
+  useEffect(() => {
+    xAxisRef.current = xAxis;
+  }, [xAxis]);
+
+  useEffect(() => {
+    yAxisRef.current = yAxis;
+  }, [yAxis]);
+
+  // 使用ref来缓存URL查询结果
+  const urlCache = useRef<Record<string, string | null>>({});
 
   // 获取图片URL - 基于六维空间坐标
   const getImageUrl = useCallback(
     (xValue: string, yValue: string) => {
       if (!matrixData || !task) {
-        // eslint-disable-next-line no-console
-        console.log("没有矩阵数据或任务数据");
-
+        if (process.env.NODE_ENV === 'development') {
+          console.log("没有矩阵数据或任务数据");
+        }
         return null;
       }
 
-      // 为调试添加唯一ID
-      const debugId = Math.random().toString(36).substring(2, 8);
+      // 使用缓存来避免重复计算
+      const cacheKey = `${xAxis}_${xValue}_${yAxis}_${yValue}`;
+      if (urlCache.current[cacheKey]) {
+        return urlCache.current[cacheKey];
+      }
 
-      // eslint-disable-next-line no-console
-      console.log(`[${debugId}] 尝试获取 [${xValue}][${yValue}] 的图片URL`);
+      // 为调试添加唯一ID，只在开发环境下生成
+      const debugId = process.env.NODE_ENV === 'development' ? Math.random().toString(36).substring(2, 8) : '';
+
+      if (process.env.NODE_ENV === 'development') {
+        console.log(`[${debugId}] 尝试获取 [${xValue}][${yValue}] 的图片URL`);
+      }
 
       // 获取变量索引
       const xVarIndex = xAxis ? parseInt(xAxis.substring(1)) : null; // 例如，从 'v0' 提取 0
@@ -297,8 +414,9 @@ export const TaskDetailView: React.FC<TaskDetailViewProps> = ({ task }) => {
 
       // 从坐标映射中查找匹配的图片URL
       if (Object.keys(matrixData.coordinates).length > 0) {
-        // eslint-disable-next-line no-console
-        console.log(`[${debugId}] 从坐标映射中查找匹配的图片`);
+        if (process.env.NODE_ENV === 'development') {
+          console.log(`[${debugId}] 从坐标映射中查找匹配的图片`);
+        }
 
         // 遍历所有坐标映射
         for (const [coordKey, url] of Object.entries(matrixData.coordinates)) {
@@ -309,22 +427,25 @@ export const TaskDetailView: React.FC<TaskDetailViewProps> = ({ task }) => {
           if (xAxis && yAxis && xVarIndex !== null && yVarIndex !== null) {
             // 两个轴都有值
             if (coordParts[xVarIndex] === xValue && coordParts[yVarIndex] === yValue) {
-              // eslint-disable-next-line no-console
-              console.log(`[${debugId}] 找到匹配的图片URL(双轴):`, url);
+              if (process.env.NODE_ENV === 'development') {
+                console.log(`[${debugId}] 找到匹配的图片URL(双轴):`, url);
+              }
               matchingUrls.push(url);
             }
           } else if (xAxis && xVarIndex !== null) {
             // 只有X轴有值
             if (coordParts[xVarIndex] === xValue) {
-              // eslint-disable-next-line no-console
-              console.log(`[${debugId}] 找到匹配的图片URL(仅X轴):`, url);
+              if (process.env.NODE_ENV === 'development') {
+                console.log(`[${debugId}] 找到匹配的图片URL(仅X轴):`, url);
+              }
               matchingUrls.push(url);
             }
           } else if (yAxis && yVarIndex !== null) {
             // 只有Y轴有值
             if (coordParts[yVarIndex] === yValue) {
-              // eslint-disable-next-line no-console
-              console.log(`[${debugId}] 找到匹配的图片URL(仅Y轴):`, url);
+              if (process.env.NODE_ENV === 'development') {
+                console.log(`[${debugId}] 找到匹配的图片URL(仅Y轴):`, url);
+              }
               matchingUrls.push(url);
             }
           }
@@ -333,9 +454,11 @@ export const TaskDetailView: React.FC<TaskDetailViewProps> = ({ task }) => {
 
       // 如果找到了匹配的URL，返回第一个
       if (matchingUrls.length > 0) {
-        // eslint-disable-next-line no-console
-        console.log(`[${debugId}] 找到 ${matchingUrls.length} 个匹配的图片URL`);
-
+        if (process.env.NODE_ENV === 'development') {
+          console.log(`[${debugId}] 找到 ${matchingUrls.length} 个匹配的图片URL`);
+        }
+        // 缓存结果
+        urlCache.current[cacheKey] = matchingUrls[0];
         return matchingUrls[0];
       }
 
@@ -344,16 +467,21 @@ export const TaskDetailView: React.FC<TaskDetailViewProps> = ({ task }) => {
         const firstUrl = Object.values(matrixData.coordinates)[0];
 
         if (firstUrl) {
-          // eslint-disable-next-line no-console
-          console.log(`[${debugId}] 未找到匹配的图片，返回第一个图片URL:`, firstUrl);
-
+          if (process.env.NODE_ENV === 'development') {
+            console.log(`[${debugId}] 未找到匹配的图片，返回第一个图片URL:`, firstUrl);
+          }
+          // 缓存结果
+          urlCache.current[cacheKey] = firstUrl;
           return firstUrl;
         }
       }
 
-      // eslint-disable-next-line no-console
-      console.log(`[${debugId}] 未找到 [${xValue}][${yValue}] 的图片URL`);
+      if (process.env.NODE_ENV === 'development') {
+        console.log(`[${debugId}] 未找到 [${xValue}][${yValue}] 的图片URL`);
+      }
 
+      // 缓存空结果
+      urlCache.current[cacheKey] = null;
       return null;
     },
     [matrixData, task, xAxis, yAxis]
@@ -540,10 +668,15 @@ export const TaskDetailView: React.FC<TaskDetailViewProps> = ({ task }) => {
   const generateTableData = useCallback((): TableRowData[] => {
     const debugId = Math.random().toString(36).substring(2, 8);
 
-    if (!task) {
-      // eslint-disable-next-line no-console
-      console.error("无法生成表格数据：任务对象不存在");
+    if (!task || !matrixData) {
+      if (process.env.NODE_ENV === 'development') {
+        console.error("无法生成表格数据：任务对象或矩阵数据不存在");
+      }
+      return [];
+    }
 
+    // 如果没有选择任何轴，返回空数组
+    if (!xAxis && !yAxis) {
       return [];
     }
 
@@ -564,25 +697,26 @@ export const TaskDetailView: React.FC<TaskDetailViewProps> = ({ task }) => {
       rowValues = yAxisVar.values.map((val: any) => val.value || "");
     }
 
-    // eslint-disable-next-line no-console
-    console.log(`[${debugId}] 原始列值:`, columnValues);
-    // eslint-disable-next-line no-console
-    console.log(`[${debugId}] 原始行值:`, rowValues);
+    if (process.env.NODE_ENV === 'development') {
+      console.log(`[${debugId}] 原始列值:`, columnValues);
+      console.log(`[${debugId}] 原始行值:`, rowValues);
+    }
 
     // 处理列值和行值中有重名的情况
     const [processedColumnValues, columnValueMap] = processVariableValues(columnValues);
     const [processedRowValues, rowValueMap] = processVariableValues(rowValues);
 
-    // eslint-disable-next-line no-console
-    console.log(`[${debugId}] 处理后的列值:`, processedColumnValues);
-    // eslint-disable-next-line no-console
-    console.log(`[${debugId}] 处理后的行值:`, processedRowValues);
+    if (process.env.NODE_ENV === 'development') {
+      console.log(`[${debugId}] 处理后的列值:`, processedColumnValues);
+      console.log(`[${debugId}] 处理后的行值:`, processedRowValues);
+    }
 
     // 预先缓存图片URL
     const imageUrlCache = cacheImageUrls(rowValues, columnValues);
 
-    // eslint-disable-next-line no-console
-    console.log(`[${debugId}] 图片URL缓存:`, imageUrlCache);
+    if (process.env.NODE_ENV === 'development') {
+      console.log(`[${debugId}] 图片URL缓存:`, imageUrlCache);
+    }
 
     // 生成表格数据
     return processedRowValues.map((processedRowValue) => {
@@ -603,34 +737,35 @@ export const TaskDetailView: React.FC<TaskDetailViewProps> = ({ task }) => {
           rowData[processedColValue] = cellData;
         } else {
           rowData[processedColValue] = null;
-          // eslint-disable-next-line no-console
-          console.log(
-            `[${debugId}] 没有为 [${originalColValue || ""}][${originalRowValue || ""}] 找到URL`
-          );
+          if (process.env.NODE_ENV === 'development') {
+            console.log(
+              `[${debugId}] 没有为 [${originalColValue || ""}][${originalRowValue || ""}] 找到URL`
+            );
+          }
         }
       });
 
       return rowData;
     });
-  }, [task, xAxis, yAxis, processVariableValues, cacheImageUrls, createCellData]);
+  }, [task, matrixData, xAxis, yAxis, processVariableValues, cacheImageUrls, createCellData]);
 
-  // 计算表格数据
-  const tableData = useMemo<TableRowData[]>(() => generateTableData(), [generateTableData]);
+  // 计算表格数据，使用useMemo缓存结果，只在依赖项变化时重新计算
+  const tableData = useMemo<TableRowData[]>(() => {
+    // 只在必要的条件满足时才生成表格数据
+    if (!task || !matrixData || (!xAxis && !yAxis)) {
+      return [];
+    }
+    return generateTableData();
+  }, [task, matrixData, xAxis, yAxis, generateTableData]);
 
-  // 添加调试代码，验证数据获取和渲染
+  // 添加调试代码，验证数据获取和渲染，仅在开发环境下执行
   useEffect(() => {
+    // 只在开发环境下输出调试信息
+    if (process.env.NODE_ENV !== 'development') return;
+
     if (tableData && tableData.length > 0) {
-      // eslint-disable-next-line no-console
-      // eslint-disable-next-line no-console
-      // eslint-disable-next-line no-console
       console.log("--------- 表格数据验证 ---------");
-      // eslint-disable-next-line no-console
-      // eslint-disable-next-line no-console
-      // eslint-disable-next-line no-console
       console.log("可用变量:", availableVariables);
-      // eslint-disable-next-line no-console
-      // eslint-disable-next-line no-console
-      // eslint-disable-next-line no-console
       console.log("过滤后的变量名:", variableNames);
 
       // 获取表格中实际显示的X和Y值
@@ -640,45 +775,25 @@ export const TaskDetailView: React.FC<TaskDetailViewProps> = ({ task }) => {
       const columnValues = xAxisVar?.values?.map((val: any) => val.value) || [""];
       const rowValues = yAxisVar?.values?.map((val: any) => val.value) || [""];
 
-      // eslint-disable-next-line no-console
-      // eslint-disable-next-line no-console
-      // eslint-disable-next-line no-console
       console.log("X轴变量:", xAxis, "值:", columnValues);
-      // eslint-disable-next-line no-console
-      // eslint-disable-next-line no-console
-      // eslint-disable-next-line no-console
       console.log("Y轴变量:", yAxis, "值:", rowValues);
 
       // 输出数据结构信息
-      // eslint-disable-next-line no-console
-      // eslint-disable-next-line no-console
-      // eslint-disable-next-line no-console
       console.log("数据结构分析:");
       if (task.results?.raw) {
-        // eslint-disable-next-line no-console
-        // eslint-disable-next-line no-console
-        // eslint-disable-next-line no-console
         console.log("results.raw 键名格式:", Object.keys(task.results.raw));
         const firstRawKey = Object.keys(task.results.raw)[0];
 
         if (firstRawKey) {
-          // eslint-disable-next-line no-console
-          // eslint-disable-next-line no-console
           console.log("results.raw 第一个条目结构:", task.results.raw[firstRawKey]);
         }
       }
 
       if (task.results?.matrix) {
-        // eslint-disable-next-line no-console
-        // eslint-disable-next-line no-console
-        // eslint-disable-next-line no-console
         console.log("results.matrix 结构:", task.results.matrix);
       }
 
       if (task.dramatiq_tasks && task.dramatiq_tasks.length > 0) {
-        // eslint-disable-next-line no-console
-        // eslint-disable-next-line no-console
-        // eslint-disable-next-line no-console
         console.log("dramatiq_tasks 第一个条目结构:", task.dramatiq_tasks[0]);
 
         // 分析v0-v5字段的分布
@@ -693,54 +808,43 @@ export const TaskDetailView: React.FC<TaskDetailViewProps> = ({ task }) => {
             }
           }
         });
-        // eslint-disable-next-line no-console
-        // eslint-disable-next-line no-console
-        // eslint-disable-next-line no-console
         console.log("dramatiq_tasks v0-v5字段统计:", vFieldStats);
       }
 
-      // 验证所有单元格URL
-      let totalCells = 0;
-      let foundUrls = 0;
+      // 验证所有单元格URL - 仅在首次渲染时执行一次
+      if (!urlValidationDoneRef.current) {
+        urlValidationDoneRef.current = true;
 
-      for (const rowValue of rowValues) {
-        for (const colValue of columnValues) {
-          totalCells++;
-          let url = null;
+        let totalCells = 0;
+        let foundUrls = 0;
 
-          if (xAxis && yAxis) {
-            url = getImageUrl(colValue, rowValue);
-          } else if (xAxis) {
-            url = getImageUrl(colValue, "");
-          } else if (yAxis) {
-            url = getImageUrl("", rowValue);
-          }
+        for (const rowValue of rowValues) {
+          for (const colValue of columnValues) {
+            totalCells++;
+            let url = null;
 
-          if (url) {
-            foundUrls++;
-            // eslint-disable-next-line no-console
-            // eslint-disable-next-line no-console
-            console.log(`单元格[${rowValue || ""}][${colValue || ""}] 找到URL:`, url);
-          } else {
-            // eslint-disable-next-line no-console
-            // eslint-disable-next-line no-console
-            console.log(`单元格[${rowValue || ""}][${colValue || ""}] 未找到URL`);
+            if (xAxis && yAxis) {
+              url = getImageUrl(colValue, rowValue);
+            } else if (xAxis) {
+              url = getImageUrl(colValue, "");
+            } else if (yAxis) {
+              url = getImageUrl("", rowValue);
+            }
+
+            if (url) {
+              foundUrls++;
+              console.log(`单元格[${rowValue || ""}][${colValue || ""}] 找到URL:`, url);
+            } else {
+              console.log(`单元格[${rowValue || ""}][${colValue || ""}] 未找到URL`);
+            }
           }
         }
+
+        console.log(`总单元格: ${totalCells}, 找到URL的: ${foundUrls}`);
       }
 
-      // eslint-disable-next-line no-console
-      // eslint-disable-next-line no-console
-      // eslint-disable-next-line no-console
-      console.log(`总单元格: ${totalCells}, 找到URL的: ${foundUrls}`);
-      // eslint-disable-next-line no-console
-      // eslint-disable-next-line no-console
-      // eslint-disable-next-line no-console
       console.log("---------------------------");
     } else {
-      // eslint-disable-next-line no-console
-      // eslint-disable-next-line no-console
-      // eslint-disable-next-line no-console
       console.log("tableData为空，无法渲染表格");
     }
   }, [
@@ -810,9 +914,25 @@ export const TaskDetailView: React.FC<TaskDetailViewProps> = ({ task }) => {
 
       {error && (
         <div className="bg-red-50 border border-red-200 text-red-700 p-4 rounded mb-4">
-          <div className="flex">
-            <Icon className="w-5 h-5 mr-2" icon="heroicons:exclamation-circle" />
-            <span>{error}</span>
+          <div className="flex justify-between items-center">
+            <div className="flex items-center">
+              <Icon className="w-5 h-5 mr-2" icon="heroicons:exclamation-circle" />
+              <span>{error}</span>
+            </div>
+            <Button
+              color="primary"
+              size="sm"
+              startContent={<Icon icon="solar:refresh-linear" width={16} />}
+              onPress={() => {
+                // 重试获取矩阵数据
+                dataLoadedRef.current = false;
+                if (task?.id) {
+                  fetchMatrixData(task.id);
+                }
+              }}
+            >
+              重试加载
+            </Button>
           </div>
         </div>
       )}
@@ -923,14 +1043,12 @@ export const TaskDetailView: React.FC<TaskDetailViewProps> = ({ task }) => {
                   variant="bordered"
                   onPress={() => {
                     // 强制刷新表格数据
-                    // eslint-disable-next-line no-console
-                    // eslint-disable-next-line no-console
-                    // eslint-disable-next-line no-console
                     console.log("手动刷新表格数据");
-                    const tempX = xAxis;
 
-                    setXAxis("");
-                    setTimeout(() => setXAxis(tempX), 50);
+                    // 使用强制刷新参数
+                    if (task?.id) {
+                      fetchMatrixData(task.id, true);
+                    }
                   }}
                 >
                   刷新表格
