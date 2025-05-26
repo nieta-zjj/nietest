@@ -1,28 +1,28 @@
 export type SiteConfig = typeof siteConfig;
 
 export const siteConfig = {
-  name: "nietest",
-  description: "实验室测试平台",
+  name: "nieta-model-lab",
+  description: "模型测试实验室",
   navItems: [
     {
       label: "Home",
       href: "/",
     },
     {
-      label: "Parameters",
-      href: "/parameters",
+      label: "Docs",
+      href: "/docs",
     },
     {
-      label: "Progress",
-      href: "/progress",
+      label: "Pricing",
+      href: "/pricing",
     },
     {
-      label: "History",
-      href: "/history",
+      label: "Blog",
+      href: "/blog",
     },
     {
-      label: "Static Test",
-      href: "/static-test",
+      label: "About",
+      href: "/about",
     },
   ],
   navMenuItems: [

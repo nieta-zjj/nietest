@@ -1,115 +1,138 @@
+/* 简单表格样式 */
 .simple-table-wrapper {
-  overflow: auto;
-  max-height: 100%;
-  position: relative;
-  z-index: 1;
-  width: 100%;
+    overflow: auto;
+    max-height: 100%;
+    position: relative;
+    z-index: 1;
+    width: 100%;
 }
 
 .simple-matrix-table {
-  width: max-content;
-  border-spacing: 4px;
-  border-collapse: separate;
-  margin: 0;
-  box-shadow: 0 0 0 1px #e0e0e0;
-  table-layout: fixed;
-  display: table;
+    width: max-content;
+    border-spacing: 4px;
+    border-collapse: separate;
+    margin: 0;
+    box-shadow: 0 0 0 1px #e0e0e0;
+    table-layout: fixed;
+    display: table;
 }
 
 .simple-matrix-table th.header-cell {
-  position: sticky;
-  top: 0;
-  z-index: 10;
-  background-color: rgb(200, 200, 200);
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
-  padding: 4px;
-  font-size: 0.75rem;
-  text-align: center;
-  border: 1px solid #e0e0e0;
-  height: auto;
-  display: table-cell;
-  width: 180px;
-  min-width: 180px;
-  max-width: 180px;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    background-color: rgb(200, 200, 200);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
+    padding: 4px;
+    font-size: 0.75rem;
+    text-align: center;
+    border: 1px solid #e0e0e0;
+    height: auto;
+    display: table-cell;
+    width: 220px;
+    min-width: 220px;
+    max-width: 220px;
 }
 
 /* 可排序表头样式 */
 .simple-matrix-table th.sortable {
-  cursor: pointer;
-  user-select: none;
+    cursor: pointer;
+    user-select: none;
 }
 
 .simple-matrix-table th.sortable:hover {
-  background-color: rgb(180, 180, 180);
+    background-color: rgb(180, 180, 180);
 }
 
 /* 排序图标样式 */
 .simple-matrix-table th .sort-icon {
-  display: inline-block;
-  opacity: 0.5;
-  transition: opacity 0.2s;
+    display: inline-block;
+    opacity: 0.5;
+    transition: opacity 0.2s;
 }
 
 .simple-matrix-table th.sorted-asc .sort-icon,
 .simple-matrix-table th.sorted-desc .sort-icon {
-  opacity: 1;
+    opacity: 1;
 }
 
 .simple-matrix-table th.header-cell:first-child {
-  position: sticky;
-  left: 0;
-  top: 0;
-  z-index: 20;
-  box-shadow: 2px 2px 4px rgba(0, 0, 0, 0.2);
-  width: 70px;
-  min-width: 70px;
-  max-width: 70px;
+    position: sticky;
+    left: 0;
+    top: 0;
+    z-index: 20;
+    box-shadow: 2px 2px 4px rgba(0, 0, 0, 0.2);
+    width: 80px;
+    min-width: 80px;
+    max-width: 80px;
 }
 
 .simple-matrix-table td.data-cell {
-  height: 180px;
-  width: 180px;
-  min-width: 180px;
-  max-width: 180px;
-  min-height: 180px;
-  padding: 0;
-  border: 1px solid #e0e0e0;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-  text-align: center;
-  vertical-align: middle;
-  border-radius: 0;
-  display: table-cell;
+    height: 220px;
+    width: 220px;
+    min-width: 220px;
+    max-width: 220px;
+    min-height: 220px;
+    padding: 0;
+    border: 1px solid #e0e0e0;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    text-align: center;
+    vertical-align: middle;
+    border-radius: 0;
+    display: table-cell;
 }
 
 .simple-matrix-table td.row-title-cell {
-  position: sticky;
-  left: 0;
-  z-index: 5;
-  background-color: rgb(200, 200, 200);
-  width: 70px;
-  min-width: 70px;
-  max-width: 70px;
-  box-shadow: 2px 0 4px rgba(0, 0, 0, 0.15);
-  padding: 2px 4px;
-  height: 180px;
-  display: table-cell;
-  font-size: 12px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  text-align: center;
-  font-weight: 500;
+    position: sticky;
+    left: 0;
+    z-index: 5;
+    background-color: rgb(200, 200, 200);
+    width: 80px;
+    min-width: 80px;
+    max-width: 80px;
+    box-shadow: 2px 0 4px rgba(0, 0, 0, 0.15);
+    padding: 2px 4px;
+    height: 220px;
+    display: table-cell;
+    font-size: 12px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    text-align: center;
+    font-weight: 500;
 }
 
 .simple-matrix-table tr {
-  display: table-row;
+    display: table-row;
 }
 
 /* 全屏模式样式 */
 .fullscreen-table .simple-table-wrapper {
-  max-height: 100vh;
+    max-height: 100vh;
 }
 
 :fullscreen .simple-table-wrapper {
-  max-height: 100vh;
+    max-height: 100vh;
+}
+
+/* 深色模式支持 */
+@media (prefers-color-scheme: dark) {
+    .simple-matrix-table th {
+        background-color: #27272a;
+        border-color: #3f3f46;
+    }
+
+    .simple-matrix-table td:first-child {
+        background-color: #18181b;
+    }
+
+    .simple-matrix-table th,
+    .simple-matrix-table td {
+        border-color: #3f3f46;
+    }
+
+    .simple-matrix-table th:hover,
+    .simple-matrix-table td:hover {
+        background-color: #374151;
+    }
 }

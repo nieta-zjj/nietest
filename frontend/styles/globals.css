@@ -2,91 +2,50 @@
 @tailwind components;
 @tailwind utilities;
 
-@layer base {
+/* 现代化滚动条样式 */
+::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
 
-    /* 隐藏所有li元素的marker */
-    li::marker {
-        content: none !important;
-        display: none !important;
+::-webkit-scrollbar-track {
+    background: transparent;
+    border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb {
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 3px;
+    transition: background 0.2s ease;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: rgba(0, 0, 0, 0.3);
+}
+
+::-webkit-scrollbar-corner {
+    background: transparent;
+}
+
+/* 深色模式下的滚动条 */
+@media (prefers-color-scheme: dark) {
+    ::-webkit-scrollbar-thumb {
+        background: rgba(255, 255, 255, 0.2);
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+        background: rgba(255, 255, 255, 0.3);
     }
 }
 
-@layer utilities {
+/* Firefox 滚动条样式 */
+* {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(0, 0, 0, 0.2) transparent;
+}
 
-    /* 确保拖拽标签中不显示marker */
-    .hide-drag-indicator li::marker {
-        content: none !important;
-        display: none !important;
+@media (prefers-color-scheme: dark) {
+    * {
+        scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
     }
-}
-
-/* 确保所有图片保持原始比例 */
-img,
-.heroui-image,
-[class*="object-"] {
-    object-fit: contain !important;
-}
-
-/* DND Kit 拖拽样式覆盖 */
-[data-dnd-draggable] {
-    transform: none !important;
-}
-
-[data-dnd-draggable] * {
-    transform: none !important;
-}
-
-.sortable-tag {
-    transform: none !important;
-    opacity: 1 !important;
-    filter: none !important;
-}
-
-[role="button"] {
-    transform: none !important;
-    opacity: 1 !important;
-    filter: none !important;
-}
-
-/* 确保下拉框显示所有选项 */
-.heroui-listbox-content,
-[data-slot="listbox-content"],
-[data-slot="base"]>div,
-.heroui-select-popover [role="listbox"] {
-    max-height: none !important;
-    overflow: visible !important;
-}
-
-/* 确保下拉框宽度足够 */
-.heroui-select-trigger {
-    min-width: 140px !important;
-}
-
-/* 确保下拉框选项文本完整显示 */
-.heroui-listbox-item-content {
-    white-space: nowrap !important;
-    overflow: visible !important;
-    text-overflow: clip !important;
-}
-
-/* 确保下拉框选项容器足够宽 */
-.heroui-listbox {
-    min-width: 140px !important;
-}
-
-/* 确保下拉框弹出内容足够宽 */
-.heroui-popover-content {
-    min-width: 140px !important;
-}
-
-/* 自定义类，确保显示所有选项 */
-.show-all-options {
-    --select-menu-content-max-height: none !important;
-}
-
-.show-all-options [role="listbox"],
-.show-all-options [data-slot="listbox"],
-.show-all-options [data-slot="base"]>div {
-    max-height: none !important;
-    overflow: visible !important;
 }

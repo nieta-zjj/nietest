@@ -1,3 +1,6 @@
+/**
+ * VToken服务工具
+ */
 import { SearchResponse } from "@/types/search";
 import { ApiSearchType, API_SEARCH_TYPES } from "@/types/api";
 
@@ -9,9 +12,9 @@ const TOKEN_STORAGE_KEY = "vtoken-x-token";
  * @returns 本地存储的x-token或null
  */
 export const getXToken = (): string | null => {
-  if (typeof window === "undefined") return null;
+    if (typeof window === "undefined") return null;
 
-  return localStorage.getItem(TOKEN_STORAGE_KEY) || null;
+    return localStorage.getItem(TOKEN_STORAGE_KEY) || null;
 };
 
 /**
@@ -19,16 +22,16 @@ export const getXToken = (): string | null => {
  * @param token 要保存的token
  */
 export const setXToken = (token: string): void => {
-  if (typeof window === "undefined") return;
-  localStorage.setItem(TOKEN_STORAGE_KEY, token);
+    if (typeof window === "undefined") return;
+    localStorage.setItem(TOKEN_STORAGE_KEY, token);
 };
 
 /**
  * 移除本地存储中的x-token
  */
 export const removeXToken = (): void => {
-  if (typeof window === "undefined") return;
-  localStorage.removeItem(TOKEN_STORAGE_KEY);
+    if (typeof window === "undefined") return;
+    localStorage.removeItem(TOKEN_STORAGE_KEY);
 };
 
 /**
@@ -40,88 +43,86 @@ export const removeXToken = (): void => {
  * @returns 搜索结果Promise
  */
 export const searchCharacterOrElement = async (
-  keywords: string,
-  pageIndex: number = 0,
-  pageSize: number = 12,
-  type: ApiSearchType = API_SEARCH_TYPES.OC
+    keywords: string,
+    pageIndex: number = 0,
+    pageSize: number = 12,
+    type: ApiSearchType = API_SEARCH_TYPES.OC
 ): Promise<SearchResponse> => {
-  try {
-    // 构建API URL - 注意：这里使用的是外部API，不是本地API
-    const url = `https://api.talesofai.cn/v2/travel/parent-search?keywords=${encodeURIComponent(keywords)}&page_index=${pageIndex}&page_size=${pageSize}&parent_type=${type}&sort_scheme=best`;
+    try {
+        // 构建API URL - 注意：这里使用的是外部API，不是本地API
+        const url = `https://api.talesofai.cn/v2/travel/parent-search?keywords=${encodeURIComponent(keywords)}&page_index=${pageIndex}&page_size=${pageSize}&parent_type=${type}&sort_scheme=best`;
 
-    // 获取x-token
-    const xToken = getXToken();
+        // 获取x-token
+        const xToken = getXToken();
 
-    // 设置请求头
-    const headers: Record<string, string> = {
-      "x-platform": "nieta-app/web",
-    };
+        // 设置请求头
+        const headers: Record<string, string> = {
+            "x-platform": "nieta-app/web",
+        };
 
-    // 如果有x-token则添加到请求头
-    if (xToken) {
-      headers["x-token"] = xToken;
+        // 如果有x-token则添加到请求头
+        if (xToken) {
+            headers["x-token"] = xToken;
+        }
+
+        // 发送请求
+        const response = await fetch(url, { headers });
+
+        // 如果响应不成功
+        if (!response.ok) {
+            return {
+                data: [],
+                metadata: {
+                    total_size: 0,
+                    total_page_size: 0,
+                    page_index: pageIndex,
+                    page_size: pageSize,
+                },
+                status: response.status,
+                error: `请求失败: ${response.status} ${response.statusText}`,
+            };
+        }
+
+        // 解析响应
+        const responseData = await response.json();
+        const totalSize = responseData.total;
+        const resultList = responseData.list || [];
+
+        // 处理响应数据
+        const data = resultList.map((item: any) => ({
+            uuid: item.uuid,
+            type: item.type,
+            name: item.name,
+            header_img: item.config.header_img,
+            heat_score: item.heat_score,
+        }));
+
+        // 返回符合SearchResponse接口的数据
+        return {
+            data: data,
+            metadata: {
+                total_size: totalSize,
+                total_page_size: Math.ceil(totalSize / pageSize),
+                page_index: pageIndex,
+                page_size: pageSize,
+            },
+            status: response.status,
+        };
+    } catch (error) {
+        console.error("搜索请求失败:", error);
+
+        return {
+            data: [],
+            metadata: {
+                total_size: 0,
+                total_page_size: 0,
+                page_index: pageIndex,
+                page_size: pageSize,
+            },
+            error: error instanceof Error ? error.message : "未知错误",
+            status: 500,
+        };
     }
-
-    // 发送请求
-    const response = await fetch(url, { headers });
-
-    // 如果响应不成功
-    if (!response.ok) {
-      return {
-        data: [],
-        metadata: {
-          total_size: 0,
-          total_page_size: 0,
-          page_index: pageIndex,
-          page_size: pageSize,
-        },
-        status: response.status,
-        error: `请求失败: ${response.status} ${response.statusText}`,
-      };
-    }
-
-    // 解析响应
-    const responseData = await response.json();
-    const totalSize = responseData.total;
-    const resultList = responseData.list || [];
-
-    // 处理响应数据
-    const data = resultList.map((item: any) => ({
-      uuid: item.uuid,
-      type: item.type,
-      name: item.name,
-      header_img: item.config.header_img,
-      heat_score: item.heat_score,
-    }));
-
-    // 返回符合SearchResponse接口的数据
-
-    return {
-      data: data,
-      metadata: {
-        total_size: totalSize,
-        total_page_size: Math.ceil(totalSize / pageSize),
-        page_index: pageIndex,
-        page_size: pageSize,
-      },
-      status: response.status,
-    };
-  } catch (error) {
-    // eslint-disable-next-line no-console
-    console.error("搜索请求失败:", error);
-
-    return {
-      data: [],
-      metadata: {
-        total_size: 0,
-        total_page_size: 0,
-        page_index: pageIndex,
-        page_size: pageSize,
-      },
-      error: error instanceof Error ? error.message : "未知错误",
-      status: 500,
-    };
-  }
 };
 
 /**
@@ -130,7 +131,7 @@ export const searchCharacterOrElement = async (
  * @returns SVG图像的data-URL
  */
 export const getPlaceholderSvg = (type: "character" | "element"): string => {
-  const text = type === "character" ? "角色" : "元素";
+    const text = type === "character" ? "角色" : "元素";
 
-  return `data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 40 40"%3E%3Crect width="40" height="40" fill="%23dddddd"/%3E%3Ctext x="50%25" y="50%25" font-family="Arial" font-size="12" fill="%23888888" text-anchor="middle" dominant-baseline="middle"%3E${text}%3C/text%3E%3C/svg%3E`;
+    return `data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 40 40"%3E%3Crect width="40" height="40" fill="%23dddddd"/%3E%3Ctext x="50%25" y="50%25" font-family="Arial" font-size="12" fill="%23888888" text-anchor="middle" dominant-baseline="middle"%3E${text}%3C/text%3E%3C/svg%3E`;
 };

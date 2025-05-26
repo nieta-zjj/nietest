@@ -1,538 +1,378 @@
-import axios, { AxiosInstance, AxiosResponse, AxiosError } from "axios";
+"use client";
 
-import { TaskStatus, TaskCreateRequest } from "@/types/task";
-import { apiService } from "@/utils/api/apiService";
+/**
+ * API客户端工具
+ *
+ * 提供与后端API通信的方法
+ */
 
-// 创建获取API基础URL的函数
+// 获取API基础URL
 export const getApiBaseUrl = (): string => {
-  return process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
+  // 优先使用环境变量
+  if (typeof process !== "undefined" && process.env.NEXT_PUBLIC_BACKEND_URL) {
+    return process.env.NEXT_PUBLIC_BACKEND_URL;
+  }
+
+  // 其次使用.env文件中的配置（客户端无法直接访问.env文件，需要通过NEXT_PUBLIC_前缀暴露）
+  // 这里作为备选方案，实际上应该在构建时将.env中的值注入到NEXT_PUBLIC_变量中
+
+  // 最后使用默认值
+  return "http://localhost:8000";
 };
 
-// 设置API基本URL
-const API_BASE_URL = getApiBaseUrl();
-
-/**
- * 获取完整的API URL
- * 确保所有API请求都使用统一的格式，避免路径重复
- * @param path API路径
- * @returns 完整的API URL
- */
+// 获取完整的API路径
 export const getApiUrl = (path: string): string => {
-  // 处理路径格式
-  let processedPath = path;
-
+  const baseUrl = getApiBaseUrl();
   // 确保路径以/开头
-  if (!processedPath.startsWith("/")) {
-    processedPath = `/${processedPath}`;
-  }
-
-  // 处理路径中的/api/前缀
-  // 如果路径已经包含/api/api/，则移除一个/api/
-  if (processedPath.startsWith("/api/api/")) {
-    processedPath = processedPath.replace("/api/api/", "/api/");
-  }
-  // 如果路径已经包含/api/，则不添加/api/
-  else if (!processedPath.startsWith("/api/")) {
-    // 如果路径以/v1/开头，则添加/api前缀
-    if (processedPath.startsWith("/v1/")) {
-      processedPath = `/api${processedPath}`;
-    }
-    // 其他情况，确保路径以/api/v1/开头
-    else if (!processedPath.startsWith("/api/v1/")) {
-      processedPath = `/api/v1${processedPath}`;
-    }
-  }
-
-  // 不再自动添加尾部斜杠，保持路径原样
-  // 移除此逻辑以避免与后端API路径不匹配的问题
-
-  // 返回完整URL
-  return `${API_BASE_URL}${processedPath}`;
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+  return `${baseUrl}${normalizedPath}`;
 };
 
-/**
- * 获取JWT认证令牌，用于用户认证
- * 这个令牌用于标准的Bearer认证，在Authorization头中使用
- */
-export const getAuthToken = (): string | null => {
-  if (typeof window === "undefined") return null; // 服务端运行时返回null
-
-  // 主要从标准的access_token位置获取
-  const token = localStorage.getItem("access_token");
-
-  if (token && token !== "undefined" && token !== "null") {
-    return token;
-  }
-
-  return null; // 如果没有找到token，返回null
-};
-
-/**
- * 获取x-token，用于特定API调用
- * 这个令牌用于生图和查询API，与JWT认证令牌不同
- */
-export const getXToken = (): string | null => {
-  if (typeof window === "undefined") return null; // 服务端运行时返回null
-
-  // 从x_token位置获取
-  const token = localStorage.getItem("x_token");
-
-  if (token && token !== "undefined" && token !== "null") {
-    return token;
-  }
-
-  return null; // 如果没有找到token，返回null
-};
-
-// 创建axios实例
-const apiClient: AxiosInstance = axios.create({
-  // 直接设置基础URL为后端API地址
-  baseURL: `${API_BASE_URL}/api/v1`,
-  timeout: 30000, // 30秒超时
-  headers: {
-    "Content-Type": "application/json",
-    Accept: "application/json",
-  },
-});
-
-// 请求拦截器
-apiClient.interceptors.request.use(
-  (config) => {
-    // 获取认证令牌
-    const token = getAuthToken();
-
-    // 如果有JWT令牌，添加到请求头
-    if (token) {
-      config.headers["Authorization"] = `Bearer ${token}`;
-    }
-
-    config.headers["x-platform"] = "nieta-app/web";
-
-    return config;
-  },
-  (error) => {
-    // eslint-disable-next-line no-console
-    console.error("API请求拦截器错误:", error);
-
-    return Promise.reject(error);
-  }
-);
-
-// 响应拦截器
-apiClient.interceptors.response.use(
-  (response) => {
-    // 记录成功响应
-    // eslint-disable-next-line no-console
-    console.log(`[响应拦截器] 成功: ${response.config.url}, 状态: ${response.status}`);
-    // 直接返回响应数据
-
-    return response;
-  },
-  (error) => {
-    // 处理错误响应
-    // eslint-disable-next-line no-console
-    console.error("[响应拦截器] 错误:", error);
-
-    // 如果是网络错误或超时
-    if (!error.response) {
-      // eslint-disable-next-line no-console
-      console.error("[响应拦截器] 网络错误或请求超时");
-
-      // 构建详细的错误信息
-      const errorInfo = {
-        code: "NETWORK_ERROR",
-        message: "网络错误，请检查您的网络连接或服务器状态",
-        url: error.config?.url,
-        method: error.config?.method,
-        baseUrl: error.config?.baseURL || API_BASE_URL,
-        details: "后端服务可能未启动或不可访问",
-        data: null,
-      };
-
-      return Promise.reject(errorInfo);
-    }
-
-    // 如果是服务器返回的错误
-    let errorMessage = "服务器错误";
-    const responseData = error.response.data;
-
-    if (responseData && typeof responseData === "object") {
-      if ("message" in responseData && typeof responseData.message === "string") {
-        errorMessage = responseData.message;
-      } else if ("detail" in responseData && typeof responseData.detail === "string") {
-        errorMessage = responseData.detail;
-      }
-    }
-
-    const errorInfo = {
-      code: error.response.status,
-      message: errorMessage,
-      data: responseData?.data || null,
-      url: error.config?.url,
-      method: error.config?.method,
-    };
-
-    // eslint-disable-next-line no-console
-    console.error("[响应拦截器] 服务器错误:", errorInfo);
-
-    return Promise.reject(errorInfo);
-  }
-);
-
-// API响应类型
-export interface ApiResponse<T = any> {
-  data?: T;
-  error?: string;
-  errorDetails?: any;
-  status?: number;
-  success: boolean;
-  message?: string;
-  metadata?: {
-    total_size?: number;
-    total_page_size?: number;
-  };
-  headers?: any;
+// API请求选项接口
+interface RequestOptions {
+  method?: string;
+  headers?: Record<string, string>;
+  body?: any;
+  isFormData?: boolean;
 }
 
-// 分页响应接口
-export interface PaginatedResponse<T> {
-  items: T[];
-  total: number;
-  page: number;
-  page_size: number;
-}
-
-// 导出任务状态枚举
-export { TaskStatus };
-
-// 任务更新请求接口
-interface UpdateTaskRequest {
-  title?: string;
-  description?: string;
-  dueDate?: string;
-  priority?: string;
-  status?: string;
-  // 根据实际需求添加其他字段
-}
-
-/**
- * 处理URL格式
- * @param url 原始URL
- * @returns 处理后的URL
- */
-const processUrl = (url: string): string => {
-  let processedUrl = url;
-
-  // 调试信息：输出请求基础信息
-  // eslint-disable-next-line no-console
-  console.log(`[API请求] 原始URL: ${url}`);
-  // eslint-disable-next-line no-console
-  console.log(`[API请求] API基础URL: ${API_BASE_URL}/api/v1`);
-
-  // 处理URL路径
-  if (processedUrl.startsWith("/api/api/v1/")) {
-    // 如果路径包含重复的/api/api/v1/，则移除一个/api/
-    processedUrl = processedUrl.replace("/api/api/v1/", "/api/v1/");
+// 处理API响应
+const handleResponse = async (response: Response) => {
+  // 检查响应状态
+  if (!response.ok) {
+    // 尝试解析错误响应
+    try {
+      const errorData = await response.json();
+      throw new Error(
+        errorData.message || errorData.detail || `请求失败: ${response.status}`
+      );
+    } catch (e) {
+      // 如果无法解析JSON，则使用状态文本
+      throw new Error(`请求失败: ${response.status} ${response.statusText}`);
+    }
   }
 
-  if (processedUrl.startsWith("/api/v1/")) {
-    // 如果路径已经包含/api/v1/，则移除它，因为基础URL中已经有了
-    processedUrl = processedUrl.substring(8); // 移除'/api/v1/'前缀
-  }
-
-  // 确保URL格式正确
-  if (!processedUrl.startsWith("/") && !processedUrl.startsWith("http")) {
-    processedUrl = "/" + processedUrl;
-  }
-
-  // 不再自动添加尾部斜杠，保持路径原样
-  // 移除此逻辑以避免与后端API路径不匹配的问题
-
-  // eslint-disable-next-line no-console
-  console.log(`[API请求] 处理后URL: ${processedUrl}`);
-
-  return processedUrl;
+  // 解析成功响应
+  return await response.json();
 };
 
-/**
- * 处理成功响应
- * @param response Axios响应对象
- * @param processedUrl 处理后的URL
- * @returns 标准化的API响应
- */
-const handleSuccessResponse = (response: AxiosResponse, processedUrl: string): ApiResponse => {
-  // 请求成功，记录响应
-  // eslint-disable-next-line no-console
-  console.log(`[API响应] 状态: ${response.status}, URL: ${processedUrl}`);
+// 通用API请求方法
+export const apiRequest = async (
+  path: string,
+  options: RequestOptions = {}
+) => {
+  const {
+    method = "GET",
+    headers = {},
+    body,
+    isFormData = false,
+  } = options;
 
-  // 检查响应格式是否符合标准格式 {code, message, data}
-  const responseData = response.data;
+  // 获取访问令牌
+  const token = typeof localStorage !== "undefined" ? localStorage.getItem("access_token") : null;
 
-  if (
-    responseData &&
-    typeof responseData === "object" &&
-    "code" in responseData &&
-    "data" in responseData
-  ) {
-    // 标准格式响应，提取data字段
-    return {
-      success: true,
-      data: responseData.data,
-      status: responseData.code || response.status,
-      message: responseData.message,
-      headers: response.headers,
-    };
+  // 准备请求头
+  const requestHeaders: Record<string, string> = {
+    ...headers,
+  };
+
+  // 如果有令牌，添加授权头
+  if (token) {
+    requestHeaders["Authorization"] = `Bearer ${token}`;
   }
 
-  // 非标准格式，直接返回整个响应
-  return {
-    success: true,
-    data: responseData,
-    status: response.status,
-    headers: response.headers,
-  };
-};
+  // 如果没有指定Content-Type且不是FormData，设置默认内容类型
+  if (!isFormData && body &&
+    !(body instanceof FormData) &&
+    !(body instanceof URLSearchParams) &&
+    !requestHeaders["Content-Type"]) {
+    requestHeaders["Content-Type"] = "application/json";
+  }
 
-/**
- * 处理网络错误
- * @param axiosError Axios错误对象
- * @param url 原始URL
- * @param processedUrl 处理后的URL
- * @param method HTTP方法
- * @returns 标准化的API错误响应
- */
-const handleNetworkError = (
-  axiosError: AxiosError,
-  url: string,
-  processedUrl: string,
-  method: string
-): ApiResponse => {
-  // eslint-disable-next-line no-console
-  console.error("[API错误] 网络连接失败或超时");
-
-  // 构建详细的错误信息
-  const errorDetails = {
-    url: url,
-    processedUrl: processedUrl,
-    method: method,
-    message: axiosError.message,
-    code: axiosError.code || "NETWORK_ERROR",
+  // 准备请求选项
+  const requestOptions: RequestInit = {
+    method,
+    headers: requestHeaders,
+    credentials: "include",
   };
 
-  // eslint-disable-next-line no-console
-  console.error("[API错误] 详细信息:", errorDetails);
-
-  return {
-    success: false,
-    data: null,
-    error: "网络连接失败，可能原因：(1)后端服务未启动 (2)CORS配置错误 (3)网络连接问题",
-    errorDetails: errorDetails,
-    status: 0,
-  };
-};
-
-/**
- * 处理服务器错误
- * @param axiosError Axios错误对象
- * @returns 标准化的API错误响应
- */
-const handleServerError = (axiosError: AxiosError): ApiResponse => {
-  // 服务器返回的错误
-  // eslint-disable-next-line no-console
-  console.error(
-    `[API错误] 服务器响应错误: ${axiosError.response?.status}`,
-    axiosError.response?.data
-  );
-
-  // 检查响应是否符合标准格式 {code, message, data}
-  const responseData = axiosError.response?.data;
-  let errorMessage = "";
-
-  if (responseData && typeof responseData === "object") {
-    if ("message" in responseData && typeof responseData.message === "string") {
-      errorMessage = responseData.message;
-    } else if ("detail" in responseData && typeof responseData.detail === "string") {
-      errorMessage = responseData.detail;
+  // 添加请求体
+  if (body) {
+    if (body instanceof FormData || body instanceof URLSearchParams) {
+      requestOptions.body = body;
     } else {
-      errorMessage = JSON.stringify(responseData);
+      requestOptions.body = JSON.stringify(body);
     }
-  } else {
-    errorMessage = axiosError.message || "服务器错误";
   }
 
-  return {
-    success: false,
-    data: null,
-    error: errorMessage,
-    status: axiosError.response?.status || 500,
-  };
-};
-
-/**
- * 处理请求
- * @param method HTTP方法
- * @param url 请求URL
- * @param data 请求数据
- * @param params 请求参数
- * @returns 标准化的API响应
- */
-const processRequest = async (
-  method: string,
-  url: string,
-  data?: any,
-  params?: any
-): Promise<ApiResponse> => {
-  // 处理URL格式
-  const processedUrl = processUrl(url);
-
+  // 发送请求
   try {
-    // 发送请求
-    const response: AxiosResponse = await apiClient.request({
-      method,
-      url: processedUrl,
-      data: ["POST", "PUT", "PATCH"].includes(method) ? data : undefined,
-      params,
-    });
-
-    return handleSuccessResponse(response, processedUrl);
-  } catch (error: any) {
-    // 处理错误
-    const axiosError = error as AxiosError;
-
-    // eslint-disable-next-line no-console
-    console.error(`[API错误] 请求失败: ${method} ${url}`, axiosError);
-
-    // 检查是否是网络错误或超时
-    if (!axiosError.response) {
-      return handleNetworkError(axiosError, url, processedUrl, method);
-    }
-
-    return handleServerError(axiosError);
-  }
-};
-
-// 导出API请求方法
-export const apiRequest = {
-  get: (url: string, params?: any) => processRequest("GET", url, undefined, params),
-  post: (url: string, data?: any, params?: any) => processRequest("POST", url, data, params),
-  put: (url: string, data?: any, params?: any) => processRequest("PUT", url, data, params),
-  delete: (url: string, params?: any) => processRequest("DELETE", url, undefined, params),
-  patch: (url: string, data?: any, params?: any) => processRequest("PATCH", url, data, params),
-};
-
-/**
- * 获取任务列表
- * @param params 查询参数
- */
-export const getTasks = async (params?: any): Promise<ApiResponse<any>> => {
-  return apiRequest.get("/tasks", params);
-};
-
-/**
- * 获取任务详情
- * @param taskId 任务ID
- */
-export const getTaskDetail = async (taskId: string): Promise<ApiResponse<any>> => {
-  return apiRequest.get(`/tasks/${taskId}`);
-};
-
-/**
- * 通过UUID获取任务详情
- * @param taskUuid 任务UUID
- * @returns 任务详情
- */
-export const getTaskByUuid = async (taskUuid: string): Promise<ApiResponse<any>> => {
-  return apiRequest.get(`/tasks/uuid/${taskUuid}`);
-};
-
-/**
- * 创建任务
- * @param data 任务数据
- */
-export const createTask = async (data: TaskCreateRequest): Promise<ApiResponse<any>> => {
-  return apiRequest.post("/tasks", data);
-};
-
-/**
- * 更新任务
- * @param taskId 任务ID
- * @param data 更新数据
- */
-export const updateTask = async (
-  taskId: string,
-  data: UpdateTaskRequest
-): Promise<ApiResponse<any>> => {
-  return apiRequest.put(`/tasks/${taskId}`, data);
-};
-
-/**
- * 删除任务
- * @param taskId 任务ID
- */
-export const deleteTask = async (taskId: string): Promise<ApiResponse<any>> => {
-  return apiRequest.delete(`/tasks/${taskId}`);
-};
-
-/**
- * 登录API函数
- * @param email 用户邮箱
- * @param password 用户密码
- */
-export const loginApi = async (email: string, password: string): Promise<ApiResponse<any>> => {
-  try {
-    // 创建FormData对象
-    const formData = new FormData();
-
-    formData.append("username", email); // 使用email作为username
-    formData.append("password", password);
-
-    // 直接调用后端API
-    const response = await fetch(`${API_BASE_URL}/api/v1/auth/login`, {
-      method: "POST",
-      body: formData,
-    });
-
-    // 解析响应
-    const responseData = await response.json();
-
-    // eslint-disable-next-line no-console
-    console.log("登录响应数据:", responseData);
-
-    // 如果有错误信息，返回错误
-    if (!response.ok || responseData.code >= 400) {
-      return {
-        success: false,
-        error: responseData.message || `登录失败: ${response.status} ${response.statusText}`,
-        status: responseData.code || response.status,
-      };
-    }
-
-    // 返回成功响应
-
-    return {
-      success: true,
-      data: responseData.data,
-      status: responseData.code || response.status,
-    };
+    const response = await fetch(getApiUrl(path), requestOptions);
+    return await handleResponse(response);
   } catch (error) {
-    // eslint-disable-next-line no-console
-    console.error("登录请求错误:", error);
-
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : "网络错误",
-      status: 500,
-    };
+    console.error("API请求错误:", error);
+    throw error;
   }
 };
 
-/**
- * 获取当前用户信息API函数
- */
-export const getCurrentUser = async (): Promise<ApiResponse<any>> => {
-  return apiRequest.get("/users/me");
+// 登录方法
+export const login = async (username: string, password: string) => {
+  // 创建 URL 编码的表单数据
+  const formBody = new URLSearchParams();
+  formBody.append("username", username);
+  formBody.append("password", password);
+  formBody.append("grant_type", "password");
+
+  // 发送登录请求
+  return await apiRequest("api/v1/auth/token", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: formBody,
+    isFormData: false,
+  });
 };
 
-// 导出API客户端和API服务
-export { apiService };
-export default apiClient;
+// 获取当前用户信息
+export const getCurrentUser = async () => {
+  return await apiRequest("api/v1/users/me");
+};
+
+// 获取用户列表
+export const getUsers = async (skip = 0, limit = 100) => {
+  return await apiRequest(`api/v1/users/?skip=${skip}&limit=${limit}`);
+};
+
+// 创建用户
+export const createUser = async (userData: any) => {
+  return await apiRequest("api/v1/users/", {
+    method: "POST",
+    body: userData,
+  });
+};
+
+// 更新用户角色
+export const updateUserRoles = async (userId: string, roles: string[]) => {
+  return await apiRequest(`api/v1/users/${userId}/roles`, {
+    method: "PUT",
+    body: roles,
+  });
+};
+
+// 提交测试任务
+export const submitTestTask = async (taskData: any) => {
+  return await apiRequest("api/v1/test/task", {
+    method: "POST",
+    body: taskData,
+  });
+};
+
+// 获取任务列表
+export const getTasks = async (
+  page = 1,
+  pageSize = 10,
+  status?: string,
+  username?: string,
+  taskName?: string,
+  favorite?: boolean,
+  deleted?: boolean,
+  minSubtasks?: number,
+  maxSubtasks?: number,
+  startDate?: string,
+  endDate?: string
+) => {
+  const params = new URLSearchParams({
+    page: page.toString(),
+    page_size: pageSize.toString(),
+  });
+
+  if (status) {
+    params.append("status", status);
+  }
+
+  if (username) {
+    params.append("username", username);
+  }
+
+  if (taskName) {
+    params.append("task_name", taskName);
+  }
+
+  if (favorite !== undefined) {
+    params.append("favorite", favorite.toString());
+  }
+
+  if (deleted !== undefined) {
+    params.append("deleted", deleted.toString());
+  }
+
+  if (minSubtasks !== undefined) {
+    params.append("min_subtasks", minSubtasks.toString());
+  }
+
+  if (maxSubtasks !== undefined) {
+    params.append("max_subtasks", maxSubtasks.toString());
+  }
+
+  if (startDate) {
+    params.append("start_date", startDate);
+  }
+
+  if (endDate) {
+    params.append("end_date", endDate);
+  }
+
+  return await apiRequest(`api/v1/test/tasks?${params.toString()}`);
+};
+
+// 获取任务详情
+export const getTask = async (taskId: string, includeSubtasks = false) => {
+  const params = new URLSearchParams({
+    include_subtasks: includeSubtasks.toString(),
+  });
+
+  return await apiRequest(`api/v1/test/task/${taskId}?${params.toString()}`);
+};
+
+// 获取任务复用配置信息
+export const getTaskReuseConfig = async (taskId: string) => {
+  return await apiRequest(`api/v1/test/task/${taskId}/reuse-config`);
+};
+
+// 获取任务进度
+export const getTaskProgress = async (taskId: string) => {
+  return await apiRequest(`api/v1/test/task/${taskId}/progress`);
+};
+
+// 取消任务
+export const cancelTask = async (taskId: string) => {
+  return await apiRequest(`api/v1/test/task/${taskId}/cancel`, {
+    method: "POST",
+  });
+};
+
+// 获取运行中的任务
+export const getRunningTasks = async () => {
+  return await apiRequest("api/v1/test/running-tasks");
+};
+
+// 切换任务收藏状态
+export const toggleTaskFavorite = async (taskId: string) => {
+  return await apiRequest(`api/v1/test/task/${taskId}/favorite`, {
+    method: "POST",
+  });
+};
+
+// 获取收藏的任务列表
+export const getFavoriteTasks = async (page = 1, pageSize = 10) => {
+  const params = new URLSearchParams({
+    page: page.toString(),
+    page_size: pageSize.toString(),
+  });
+
+  return await apiRequest(`api/v1/test/favorite-tasks?${params.toString()}`);
+};
+
+// 切换任务删除状态
+export const toggleTaskDelete = async (taskId: string) => {
+  return await apiRequest(`api/v1/test/task/${taskId}/delete`, {
+    method: "POST",
+  });
+};
+
+// 更新任务子任务统计
+export const updateTaskStats = async (taskId: string) => {
+  return await apiRequest(`api/v1/test/task/${taskId}/update-stats`, {
+    method: "POST",
+  });
+};
+
+// 批量更新所有任务统计
+export const batchUpdateTasksStats = async () => {
+  return await apiRequest("api/v1/test/tasks/batch-update-stats", {
+    method: "POST",
+  });
+};
+
+// 获取任务统计信息
+export const getTasksStats = async (
+  username?: string,
+  taskName?: string,
+  favorite?: boolean,
+  deleted?: boolean,
+  minSubtasks?: number,
+  maxSubtasks?: number,
+  startDate?: string,
+  endDate?: string
+) => {
+  const params = new URLSearchParams();
+
+  if (username) {
+    params.append("username", username);
+  }
+
+  if (taskName) {
+    params.append("task_name", taskName);
+  }
+
+  if (favorite !== undefined) {
+    params.append("favorite", favorite.toString());
+  }
+
+  if (deleted !== undefined) {
+    params.append("deleted", deleted.toString());
+  }
+
+  if (minSubtasks !== undefined) {
+    params.append("min_subtasks", minSubtasks.toString());
+  }
+
+  if (maxSubtasks !== undefined) {
+    params.append("max_subtasks", maxSubtasks.toString());
+  }
+
+  if (startDate) {
+    params.append("start_date", startDate);
+  }
+
+  if (endDate) {
+    params.append("end_date", endDate);
+  }
+
+  const queryString = params.toString();
+  return await apiRequest(`api/v1/test/tasks/stats${queryString ? `?${queryString}` : ''}`);
+};
+
+// 获取任务矩阵数据
+export const getTaskMatrix = async (taskId: string) => {
+  return await apiRequest(`api/v1/test/task/${taskId}/matrix`);
+};
+
+// 更新子任务评分
+export const updateSubtaskRating = async (subtaskId: string, rating: number) => {
+  return await apiRequest(`api/v1/test/subtask/${subtaskId}/rating`, {
+    method: "POST",
+    body: rating,
+  });
+};
+
+// 获取子任务评分
+export const getSubtaskRating = async (subtaskId: string) => {
+  return await apiRequest(`api/v1/test/subtask/${subtaskId}/rating`);
+};
+
+// 添加子任务评价
+export const addSubtaskEvaluation = async (subtaskId: string, evaluation: string) => {
+  return await apiRequest(`api/v1/test/subtask/${subtaskId}/evaluation`, {
+    method: "POST",
+    body: evaluation,
+  });
+};
+
+// 删除子任务评价
+export const removeSubtaskEvaluation = async (subtaskId: string, evaluationIndex: number) => {
+  return await apiRequest(`api/v1/test/subtask/${subtaskId}/evaluation/${evaluationIndex}`, {
+    method: "DELETE",
+  });
+};
